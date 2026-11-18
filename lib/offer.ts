@@ -1,10 +1,12 @@
 import { bottle } from './fiber';
 import type { Channel, FiberBrowserNode } from '@fiber-pay/sdk/browser';
-import { encryptResult, type EncryptedPayload } from './crypto';
+import { encryptBundle, type Bundle, type EncryptedPayload } from './crypto';
+import { listingAad, normalizeListing, priceShannons, type Listing } from './listing';
 
 export type EncryptedOffer = EncryptedPayload & {
-  version: 2;
+  version: 3;
   cipher: 'AES-256-GCM';
+  listing: Listing;
   invoice: string;
   paymentHash: `0x${string}`;
   lastHop: {
@@ -87,23 +89,26 @@ function normalizeLastHop(value: unknown): EncryptedOffer['lastHop'] {
   };
 }
 
-export async function createOffer(seller: FiberBrowserNode, sellerChannel: Channel, plaintext: string) {
+export async function createOffer(seller: FiberBrowserNode, sellerChannel: Channel, listingInput: Listing, bundle: Bundle) {
   if (!sellerChannel.channel_outpoint) {
     throw new Error('Seller channel does not have a confirmed outpoint.');
   }
-  const encrypted = await encryptResult(plaintext);
+  const listing = normalizeListing(listingInput);
+  // The AES key doubles as the payment preimage: paying the invoice reveals it.
+  const encrypted = await encryptBundle(bundle, listingAad(listing));
   const invoice = await seller.newInvoice({
-    amount: '0x5f5e100', // 1 CKB
+    amount: `0x${priceShannons(listing.priceCkb).toString(16)}`,
     currency: 'Fibt',
     payment_preimage: encrypted.key,
     hash_algorithm: 'sha256',
     allow_trampoline_routing: true,
-    description: 'Encrypted data payment tutorial',
+    description: `Brief: ${listing.title}`.slice(0, 64),
     expiry: '0xe10',
   });
   const offer: EncryptedOffer = {
-    version: 2,
+    version: 3,
     cipher: 'AES-256-GCM',
+    listing,
     ...encrypted.payload,
     invoice: invoice.invoice_address,
     paymentHash: invoice.invoice.data.payment_hash,
@@ -125,15 +130,16 @@ export async function createOffer(seller: FiberBrowserNode, sellerChannel: Chann
 
 export function parseOffer(value: string) {
   const offer: unknown = JSON.parse(value);
-  if (!isJsonObject(offer) || offer.version !== 2 || offer.cipher !== 'AES-256-GCM') {
-    throw new Error('Create a fresh version 2 AES-256-GCM encrypted offer.');
+  if (!isJsonObject(offer) || offer.version !== 3 || offer.cipher !== 'AES-256-GCM') {
+    throw new Error('Paste a version 3 Brief Unlock listing (AES-256-GCM).');
   }
   if (typeof offer.invoice !== 'string' || !offer.invoice.toLowerCase().startsWith('fibt')) {
     throw new Error('Encrypted offer is missing a Fiber testnet Invoice.');
   }
   return {
-    version: 2,
+    version: 3,
     cipher: 'AES-256-GCM',
+    listing: normalizeListing(offer.listing),
     ciphertext: normalizeHexBytes(offer.ciphertext, 'Ciphertext'),
     iv: normalizeHexBytes(offer.iv, 'AES-GCM IV', 12),
     invoice: offer.invoice,

@@ -1,43 +1,132 @@
-# Encrypted data payment starter
+# Brief Unlock
 
-A browser-only Buyer and Seller using Fiber and CKB Testnet. The full walkthrough is at https://www.fiber.world/docs/build/encrypted-data-payment.
+Sell a research brief with a free preview over a Fiber payment on CKB Testnet.
+The buyer reads the title and preview for free and pays the listed price
+through a Fiber invoice. The payment reveals the AES key that opens the full
+brief and its attached file.
 
-## Run locally
+Built from the starter project in the Fiber tutorial
+[Unlock Encrypted Data with a Fiber Payment](https://www.fiber.world/docs/build/encrypted-data-payment)
+(Fiber v0.10.1, `@fiber-pay/sdk` 0.3.1). Testnet only.
 
-Use Node.js 22.18 or newer and npm. Extract the archive, then run these commands inside `encrypted-data-payment`:
+![Brief Unlock demo: publish, preview, pay 2 CKB, unlock](docs/demo/brief-unlock-demo.gif)
+
+Video (37 s, WebM): [docs/demo/brief-unlock-demo.webm](docs/demo/brief-unlock-demo.webm)
+
+## How it works
+
+1. **Seller C writes a brief.** It has a title, a free preview, a price (1, 2 or
+   5 CKB), the full text, and an optional file of up to 256 KB.
+2. **Encrypt and list.** The browser makes a fresh AES-256 key and encrypts the
+   text and the file together with AES-GCM. The public listing (title, preview,
+   price, word count, file name, type and size) is passed to AES-GCM as
+   *additional authenticated data*. The listing stays readable, but any change
+   to it makes decryption fail. Seller C creates a Fiber invoice for the listed
+   price and uses the AES key as the payment preimage.
+3. **Buyer A loads the listing.** Before showing the store card, the app decodes
+   the invoice and checks the network (`Fibt`), that the amount equals the
+   listed price, and that the payment hash matches the listing.
+4. **Try without paying.** A guessed key is rejected by AES-GCM.
+5. **Pay.** Buyer A pays through Bottle B (A → Bottle B → C). To settle, the
+   seller's node reveals the preimage. The app checks that
+   `SHA-256(revealed key) == payment hash`.
+6. **Unlock.** The revealed key decrypts the brief and the file (an image is
+   shown inline and can be downloaded). An **integrity test** button tries the
+   same key against an edited preview and shows that it is rejected.
+
+## What changed from the starter
+
+| Area | Starter | Brief Unlock |
+| --- | --- | --- |
+| Content | One plain-text result | Listing with title, free preview, price and word count, plus the full brief and an optional encrypted file |
+| Price | Fixed 1 CKB | Seller picks 1, 2 or 5 CKB; the invoice is for that amount |
+| Offer format | `version: 2` | `version: 3` with a validated `listing` object (`lib/listing.ts`); unknown fields are dropped |
+| Encryption | AES-GCM over the text | AES-GCM over `{ body, file }`, with the listing as additional data (`lib/crypto.ts`) |
+| Invoice check | Amount must be 1 CKB | Amount must equal the listed price (`lib/payment.ts`) |
+| After payment | Decrypt the text | Check SHA-256(key) against the payment hash, decrypt the text and the file, show or download the file, run the integrity test |
+| Node cards | Address and channel state | Adds the on-chain balance, a faucet link and a balance bar for each channel |
+| Channel status | Manual refresh | Checks every 5 s while a channel is opening **or its Bottle connection is not up yet**, and shows "Connecting to Bottle…" |
+| UI | Minimal form | Step tracker, seller form, store card with a locked preview, receipt, unlocked view |
+| Tests | 9 payment tests | +1 price-mismatch test (`payment.test.mjs`), +5 crypto and listing tests (`brief.test.mjs`) |
+
+These starter files are unchanged and keep their safety logic:
+`lib/payment-submission.ts` (a payment is never resent while its outcome is
+unknown), `lib/node-session.ts`, `lib/fiber.ts`, `lib/channel-funding.ts` and
+`lib/fiber-testnet-runtime.ts`. `lib/progress.ts` only changes its session
+storage key, so old v2 offers are not restored.
+
+New files: `lib/listing.ts`, `lib/balance.ts`, `lib/sample.ts`, `brief.test.mjs`.
+
+## Run it
+
+You need Node.js 22.18 or newer.
 
 ```sh
 npm install
-npm run dev
+npm run dev          # http://localhost:3001
+# or a production build:
+npm run build && npm start
 ```
 
-Open http://localhost:3001. Use `localhost` or HTTPS: the WASM runtime requires a secure context, SharedArrayBuffer, Web Locks, and cross-origin isolation. `next.config.mjs` supplies the isolation headers. Browser extensions or a proxy that strips those headers can prevent startup.
+Use `localhost` or HTTPS. The Fiber WASM node needs a secure context,
+SharedArrayBuffer and cross-origin isolation, and `next.config.mjs` sets the
+COOP/COEP headers. Avoid changing code while the nodes are running: a dev-mode
+hot reload stops both nodes. Press **Start node** again to resume, and the
+saved keys and channels are reused.
 
-## Use the starter
+1. Press **Start node** for Buyer A and for Seller C. Copy each funding address
+   into the [CKB Testnet faucet](https://faucet.nervos.org/). Each node needs
+   more than 500 CKB.
+2. Press **Open 500 CKB channel** on both cards and wait for `CHANNEL_READY`.
+   This usually takes about a minute.
+3. As the seller, edit the brief or keep the sample, pick a price, optionally
+   attach a file (try `docs/sample/checklist-card.png`), then press
+   **Encrypt & list**.
+4. Press **Send listing to buyer →** and then **Load listing**. You can also copy
+   the JSON and paste it into the buyer box.
+5. Press **Try to open without paying** (it is rejected), then **Pay N CKB &
+   unlock**, then **Decrypt with revealed key**.
 
-Start each node, copy its funding address to the linked faucet, and request enough Testnet CKB for 500 CKB of channel funding plus the on-chain transaction fee. Channel V2 reserves 100 CKB, leaving 400 CKB to meet Bottle’s auto-accept minimum. Open both channels and check their status until each reports `CHANNEL_READY`. Confirmation can take several minutes.
-
-The channel balances show whether Bottle already has inbound liquidity. The 5 CKB transfer is an optional experiment if that balance already covers the purchase. Its button checks an existing transfer before sending another.
-
-Create an encrypted offer, copy the public JSON into the Buyer field, validate it, and test decryption without the key. Then pay its 1 CKB Invoice and decrypt the result. The receipt shows the actual routing fee; the configured maximum is 1 CKB.
-
-## Resume and troubleshoot
-
-- After refreshing, start the same saved nodes, revalidate the restored offer, and choose **Check payment status**. A completed or pending attempt is never automatically submitted again. An explicit retry is available only after the node confirms failure.
-- An expired Invoice is blocked before recording a new attempt. If the node explicitly rejects submission and confirms no payment record exists, the rejected attempt is cleared; choose **Start another offer** to create a fresh Invoice. Timeouts, worker failures, and unavailable status reads keep the attempt locked for status checking.
-- Keep one tab per saved node. Browser storage holds node identities and public offer/payment progress; clearing it can lose access to funded channels. AES keys and decrypted output are not saved by the application. A settled key is recovered through `getPayment`.
-- If a 5 CKB transfer was interrupted before its hash returned, the button blocks another transfer. Review the Seller's payment history (`listPayments`) to identify the result before deliberately clearing its `fiber-docs:encrypted-inbound:<seller identifier>` session entry.
-- If a channel is slow, check its status or reconnect it. The existing channel is reused. Do not clear its storage or fund a replacement to resolve a wait.
-- Faucet requests and network confirmations can take longer than expected. Check the faucet transaction and refresh the channel status once funds arrive.
-
-## Code and checks
-
-`lib/offer.ts` creates the public payload. `lib/payment.ts` checks the decoded Invoice's network, amount, and payment hash and records an attempt before submission. `lib/progress.ts` restores public data only for matching saved node identities. `lib/node-session.ts` prevents concurrent runtimes from opening the same saved node.
+Checks:
 
 ```sh
 npm run typecheck
-npm test
+npm test             # 15 tests
 npm run build
 ```
 
-The application catches action errors and displays them inline. If a payment outcome is unknown, check the existing attempt instead of initiating a replacement.
+## A recorded Testnet run
+
+These screenshots are from one run on CKB Testnet on 2026-11-18, in Chromium
+140 with the production build.
+
+| Step | Screenshot |
+| --- | --- |
+| Both channels `CHANNEL_READY` | [02-channels-ready.png](docs/demo/02-channels-ready.png) |
+| Seller form, 2 CKB, PNG attached | [03-seller-form.png](docs/demo/03-seller-form.png) |
+| Listed, with the public listing JSON | [04-seller-published-listing-json.png](docs/demo/04-seller-published-listing-json.png) |
+| Buyer store card, invoice checked | [05-buyer-store-preview.png](docs/demo/05-buyer-store-preview.png) |
+| Decryption rejected without the key | [06-buyer-decryption-rejected.png](docs/demo/06-buyer-decryption-rejected.png) |
+| Receipt: 2 CKB + 0.002 CKB fee, hash check passed | [07-payment-receipt.png](docs/demo/07-payment-receipt.png) |
+| Channel balances after payment | [08-channel-balances-after.png](docs/demo/08-channel-balances-after.png) |
+| Unlocked brief, file, integrity test | [09-unlocked-brief-and-file.png](docs/demo/09-unlocked-brief-and-file.png) |
+| Whole page | [00-overview-full-page.png](docs/demo/00-overview-full-page.png) |
+
+Payment hash of that run:
+`0x31d4a1a0ce41522bc1b2edd653584715eae8024442ed8c227fcd2f82b5cedfa3`.
+In that run the receipt appeared about 1.1 s after pressing Pay (one
+measurement, not a benchmark).
+
+## Limits
+
+- Both roles run in one page so the demo is self-contained. In real use the
+  seller runs separately and publishes the listing JSON, which holds no key.
+- A payment proves that the revealed key opens this ciphertext. It does not
+  prove that the brief is accurate. Previews, reputation and refunds have to
+  cover that.
+- Invoices expire after one hour. The file limit is 256 KB because the
+  ciphertext travels inside the listing JSON.
+- Use Testnet only. Never send Mainnet CKB to these addresses.
+
+Screenshots of the original tutorial run (Quest 1) are in
+[docs/quest-1-tutorial](docs/quest-1-tutorial).

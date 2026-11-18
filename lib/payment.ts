@@ -1,12 +1,14 @@
 import type { FiberBrowserNode, SendPaymentParams } from '@fiber-pay/sdk/browser';
 import type { EncryptedOffer } from './offer';
+import { priceShannons } from './listing.ts';
 import { assertEncryptedInvoiceNotExpired, EncryptedPaymentRejectedError, submitEncryptedPayment } from './payment-submission.ts';
 
-export async function validateOffer(node: FiberBrowserNode, offer: EncryptedOffer) {
+/** Checks the decoded Invoice against the listing: Testnet, the advertised price, the same payment hash. */
+export async function validateOffer(node: FiberBrowserNode, offer: Pick<EncryptedOffer, 'invoice' | 'paymentHash' | 'listing'>) {
   const { invoice } = await node.parseInvoice({ invoice: offer.invoice });
-  if (invoice.currency !== 'Fibt' || BigInt(invoice.amount ?? '0x0') !== 100_000_000n
+  if (invoice.currency !== 'Fibt' || BigInt(invoice.amount ?? '0x0') !== priceShannons(offer.listing.priceCkb)
     || invoice.data.payment_hash.toLowerCase() !== offer.paymentHash.toLowerCase()) {
-    throw new Error('The Invoice does not match this 1 CKB encrypted offer.');
+    throw new Error(`The Invoice does not match this ${offer.listing.priceCkb} CKB listing.`);
   }
   return invoice;
 }

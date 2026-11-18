@@ -1,5 +1,5 @@
 /** Public lesson progress only. Keys and decrypted content stay out of this cache. */
-export const encryptedSessionKey = 'fiber-docs:encrypted-data-progress-v1';
+export const encryptedSessionKey = 'brief-unlock:progress-v1';
 export const encryptedBuyerProfile = 'fiber-docs:multi-hop-sender-v1';
 export const encryptedSellerProfile = 'fiber-docs:multi-hop-receiver-v1';
 export const earlierSenderKey = 'fiber-docs:wasm-quickstart-profile-v1';

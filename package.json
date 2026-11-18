@@ -1,12 +1,12 @@
 {
-  "name": "fiber-encrypted-data-payment",
+  "name": "fiber-brief-unlock",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
     "build": "next build",
     "typecheck": "tsc --noEmit",
-    "start": "next start",
-    "test": "node --experimental-strip-types --test payment.test.mjs"
+    "start": "next start -p 3001",
+    "test": "node --experimental-strip-types --test payment.test.mjs brief.test.mjs"
   },
   "dependencies": {
     "@fiber-pay/sdk": "0.3.1",

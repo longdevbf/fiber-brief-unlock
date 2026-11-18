@@ -3,7 +3,7 @@ import test from 'node:test';
 import { payForOffer, validateOffer } from './lib/payment.ts';
 
 const hash = `0x${'a'.repeat(64)}`;
-const offer = { invoice: 'fibt-example', paymentHash: hash, lastHop: {} };
+const offer = { invoice: 'fibt-example', paymentHash: hash, lastHop: {}, listing: { priceCkb: 1 } };
 function fixture(status = 'Success') {
   const calls = [];
   const result = { status, payment_hash: hash, fee: '0x0' };
@@ -23,6 +23,12 @@ test('mismatched currency, amount, or payment hash blocks submission', async () 
     await assert.rejects(validateOffer(node, offer), /does not match/);
     assert.deepEqual(calls, []);
   }
+});
+test('an Invoice for a different amount than the listed price blocks submission', async () => {
+  const { node, calls } = fixture();
+  await assert.rejects(validateOffer(node, { ...offer, listing: { priceCkb: 2 } }), /does not match this 2 CKB listing/);
+  await assert.rejects(payForOffer(node, { ...offer, listing: { priceCkb: 5 } }, '', () => calls.push('record')), /does not match/);
+  assert.deepEqual(calls, []);
 });
 test('attempt is recorded before submission and failed storage prevents spending', async () => {
   const { node, calls } = fixture();
